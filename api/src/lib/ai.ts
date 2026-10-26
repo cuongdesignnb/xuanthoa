@@ -1,59 +1,285 @@
 /**
- * Tích hợp Claude (Anthropic) cho bài tập & đề thi:
- *  - sinh câu hỏi / đề thi (structured output + zod),
+ * AI cho bài tập & đề thi qua cổng tương thích OpenAI (mặc định ModelAPI — modelapi.vn), giống dự án comnha:
+ *  - sinh câu hỏi / đề thi (JSON theo schema zod),
  *  - viết lại 1 câu, viết giải thích,
  *  - chấm câu tự luận / trả lời ngắn.
- * Model lấy từ settings key "ai" (`model`), khoá API lấy từ env ANTHROPIC_API_KEY.
- * Có bộ chấm dự phòng (so khớp chuỗi/kana) khi không có khoá.
+ * Chỉ backend gọi provider; trình duyệt không bao giờ thấy API key.
+ * Biến môi trường:
+ *   AI_API_KEY (bắt buộc) · AI_BASE_URL (mặc định https://modelapi.vn/v1) · AI_MODEL (mặc định gpt-6.1-sol)
+ *   AI_FALLBACK_MODEL (model dự phòng khi model chính hết kênh) · AI_TIMEOUT_SECONDS (mặc định 120)
+ * Model có thể ghi đè trong Cài đặt › AI (settings key "ai".model). Có bộ chấm dự phòng khi chưa cấu hình khoá.
  */
-import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
 import { HttpError } from "./http.js";
+import { decryptSecret } from "./secret.js";
 
 /* ------------------------------------------------------------------ */
 /* Cấu hình                                                            */
 /* ------------------------------------------------------------------ */
 
-export const DEFAULT_MODEL = "claude-sonnet-5-5";
-export const NO_KEY_MESSAGE = "Chưa cấu hình ANTHROPIC_API_KEY";
+export const DEFAULT_MODEL = "gpt-6.1-sol";
+export const NO_KEY_MESSAGE = "Chưa cấu hình khoá AI — vào Cài đặt › AI để nhập khoá ModelAPI";
+
+/** Giá trị mặc định từ biến môi trường (dùng khi trang Cài đặt › AI để trống). */
+export function aiEnv() {
+  return {
+    key: process.env.AI_API_KEY?.trim() || "",
+    base: (process.env.AI_BASE_URL || "https://modelapi.vn/v1").trim().replace(/\/+$/, ""),
+    model: process.env.AI_MODEL?.trim() || DEFAULT_MODEL,
+    fallback: process.env.AI_FALLBACK_MODEL?.trim() || "",
+    timeoutSec: Number(process.env.AI_TIMEOUT_SECONDS) || 120,
+  };
+}
+
+/** Giá trị lưu trong settings key "ai" (khoá API đã mã hoá, không bao giờ trả ra ngoài). */
+export type AiStored = {
+  apiKeyEnc?: string;
+  apiKeyLast4?: string;
+  baseUrl?: string;
+  model?: string;
+  fallbackModel?: string;
+  timeoutSec?: number;
+  gradingEnabled?: boolean;
+  generateEnabled?: boolean;
+};
+
+export async function aiStored(): Promise<AiStored> {
+  const [row] = await db.select().from(schema.settings).where(eq(schema.settings.key, "ai"));
+  return (row?.value ?? {}) as AiStored;
+}
+
+const safeBase = (b: string) => {
+  const base = b.trim().replace(/\/+$/, "");
+  // Chỉ cho HTTPS (trừ localhost khi dev) để khoá không đi qua kênh không mã hoá.
+  return base.startsWith("https://") || /^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(base) ? base : "";
+};
+
+export type AiConfig = {
+  key: string;
+  keySource: "admin" | "env" | null;
+  base: string;
+  model: string;
+  fallback?: string;
+  timeoutMs: number;
+  gradingEnabled: boolean;
+  generateEnabled: boolean;
+};
+
+/**
+ * Cấu hình AI hiệu lực: Cài đặt › AI (admin tự điền) → biến môi trường → mặc định.
+ * `override` dùng cho nút "Kiểm tra kết nối" với giá trị chưa lưu.
+ */
+export async function aiConfig(override?: Partial<{ apiKey: string; baseUrl: string; model: string; fallbackModel: string }>): Promise<AiConfig> {
+  const st = await aiStored();
+  const env = aiEnv();
+  const adminKey = override?.apiKey?.trim() || decryptSecret(st.apiKeyEnc);
+  const key = adminKey || env.key;
+  return {
+    key,
+    keySource: adminKey ? "admin" : env.key ? "env" : null,
+    base: safeBase(override?.baseUrl || st.baseUrl || "") || safeBase(env.base) || "https://modelapi.vn/v1",
+    model: override?.model?.trim() || st.model?.trim() || env.model,
+    fallback: override?.fallbackModel?.trim() || st.fallbackModel?.trim() || env.fallback || undefined,
+    timeoutMs: Math.min(Math.max(Number(st.timeoutSec) || env.timeoutSec, 10), 290) * 1000,
+    gradingEnabled: st.gradingEnabled !== false,
+    generateEnabled: st.generateEnabled !== false,
+  };
+}
 
 export type AiSettings = { model: string; gradingEnabled: boolean };
 
 export async function aiSettings(): Promise<AiSettings> {
-  const [row] = await db.select().from(schema.settings).where(eq(schema.settings.key, "ai"));
-  const v = (row?.value ?? {}) as Partial<AiSettings>;
-  return { model: v.model || DEFAULT_MODEL, gradingEnabled: v.gradingEnabled !== false };
+  const c = await aiConfig();
+  return { model: c.model, gradingEnabled: c.gradingEnabled };
 }
 
-export const hasAiKey = () => !!process.env.ANTHROPIC_API_KEY?.trim();
+export const hasAiKey = async () => !!(await aiConfig()).key;
 
-let client: Anthropic | null = null;
-function getClient() {
-  if (!hasAiKey()) throw new HttpError(503, NO_KEY_MESSAGE);
-  client ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2 });
-  return client;
-}
-
-/** Chuyển lỗi SDK thành HttpError có thông điệp tiếng Việt. */
+/** Chuẩn hoá lỗi thành HttpError có thông điệp tiếng Việt. */
 export function aiError(e: unknown): HttpError {
   if (e instanceof HttpError) return e;
-  if (e instanceof Anthropic.AuthenticationError) return new HttpError(503, "ANTHROPIC_API_KEY không hợp lệ hoặc đã bị thu hồi");
-  if (e instanceof Anthropic.PermissionDeniedError) return new HttpError(503, "Khoá API không có quyền dùng model này");
-  if (e instanceof Anthropic.NotFoundError) return new HttpError(502, "Model AI cấu hình không tồn tại — kiểm tra Cài đặt › AI");
-  if (e instanceof Anthropic.RateLimitError) return new HttpError(429, "AI đang bị giới hạn tần suất, vui lòng thử lại sau ít phút");
-  if (e instanceof Anthropic.BadRequestError) return new HttpError(502, `Yêu cầu tới AI không hợp lệ: ${e.message}`);
-  if (e instanceof Anthropic.InternalServerError) return new HttpError(503, "Dịch vụ AI đang quá tải, vui lòng thử lại sau");
-  if (e instanceof Anthropic.APIConnectionError) return new HttpError(502, "Không kết nối được dịch vụ AI");
-  if (e instanceof Anthropic.APIError) return new HttpError(502, `Lỗi dịch vụ AI (${e.status ?? "?"}): ${e.message}`);
   return new HttpError(502, `Lỗi AI: ${(e as Error)?.message ?? String(e)}`);
 }
 
+/* ------------------------------------------------------------------ */
+/* Gọi Chat Completions (tương thích OpenAI)                           */
+/* ------------------------------------------------------------------ */
+
+type Msg = { role: "system" | "user" | "assistant"; content: string };
+
+const MODEL_GONE =
+  /no available channel|model[^.]{0,40}(not (found|exist|available|supported)|does not exist|unavailable|deprecated)|unknown model|invalid model/i;
+const mask = (s: string, key: string) => (key ? s.split(key).join("***") : s).slice(0, 300);
+
+/** Gỡ ```json … ``` và lấy đối tượng JSON đầu tiên trong chuỗi. */
+export function parseJsonLoose(t: string): unknown {
+  const s = t
+    .replace(/^\s*```(?:json)?/i, "")
+    .replace(/```\s*$/, "")
+    .trim();
+  try {
+    return JSON.parse(s);
+  } catch {
+    const a = s.indexOf("{");
+    const b = s.lastIndexOf("}");
+    if (a >= 0 && b > a) {
+      try {
+        return JSON.parse(s.slice(a, b + 1));
+      } catch {
+        /* rơi xuống */
+      }
+    }
+    return undefined;
+  }
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const messageText = (data: any): string => {
+  const m = data?.choices?.[0]?.message?.content;
+  return typeof m === "string" ? m : Array.isArray(m) ? m.map((p: any) => p?.text ?? "").join("") : "";
+};
+
+/** Đọc stream SSE của Chat Completions, gọi onText với toàn bộ văn bản đã nhận. */
+async function readStream(res: Response, onText: (soFar: string) => void) {
+  const reader = res.body!.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  let acc = "";
+  let finish: string | null = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i: number;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (data === "[DONE]") continue;
+      try {
+        const j = JSON.parse(data);
+        const d = j?.choices?.[0]?.delta?.content;
+        if (typeof d === "string" && d) {
+          acc += d;
+          onText(acc);
+        }
+        finish = j?.choices?.[0]?.finish_reason ?? finish;
+      } catch {
+        /* bỏ dòng hỏng */
+      }
+    }
+  }
+  return { text: acc, finish };
+}
+
 /**
- * Gọi Claude với structured output (JSON schema sinh từ zod), stream để tránh timeout,
- * trả về object đã validate. `onText` nhận toàn bộ văn bản đã nhận (để báo tiến độ).
+ * Gọi model và trả về văn bản trả lời.
+ * Thử lần lượt: JSON mode + max_tokens → không JSON mode → max_completion_tokens (cho gateway kén tham số).
+ * Model hết kênh → chuyển sang AI_FALLBACK_MODEL; 5xx tạm thời → thử lại 1 lần.
+ */
+async function chat(opts: {
+  cfg: AiConfig;
+  model: string;
+  messages: Msg[];
+  maxTokens: number;
+  json: boolean;
+  onText?: (s: string) => void;
+}): Promise<string> {
+  const env = opts.cfg;
+  if (!env.key) throw new HttpError(503, NO_KEY_MESSAGE);
+  const url = `${env.base}/chat/completions`;
+  const stream = !!opts.onText;
+  const base = { model: opts.model, messages: opts.messages, temperature: 0.4, ...(stream ? { stream: true } : {}) };
+  const bodies: Record<string, unknown>[] = [
+    ...(opts.json ? [{ ...base, max_tokens: opts.maxTokens, response_format: { type: "json_object" } }] : []),
+    { ...base, max_tokens: opts.maxTokens },
+    { ...base, max_completion_tokens: opts.maxTokens },
+  ];
+  let lastStatus = 0;
+  let lastMsg = "";
+  let retried = false;
+  for (let i = 0; i < bodies.length; i++) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), env.timeoutMs);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${env.key}` },
+        body: JSON.stringify(bodies[i]),
+        signal: ctl.signal,
+      });
+      if (res.ok) {
+        if (stream && (res.headers.get("content-type") ?? "").includes("text/event-stream")) {
+          const { text, finish } = await readStream(res, opts.onText!);
+          if (finish === "length") throw new HttpError(502, "Kết quả AI bị cắt ngắn — hãy giảm số câu hỏi");
+          return text;
+        }
+        const data = JSON.parse(await res.text());
+        if (data?.choices?.[0]?.finish_reason === "length") throw new HttpError(502, "Kết quả AI bị cắt ngắn — hãy giảm số câu hỏi");
+        const text = messageText(data);
+        opts.onText?.(text);
+        return text;
+      }
+      const raw = await res.text();
+      lastStatus = res.status;
+      try {
+        const j = JSON.parse(raw);
+        lastMsg = String(j?.error?.message ?? j?.message ?? "");
+      } catch {
+        lastMsg = /^\s*</.test(raw) ? "" : raw;
+      }
+      lastMsg = mask(lastMsg, env.key);
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw new HttpError(
+        502,
+        (e as Error)?.name === "AbortError" ? "AI phản hồi quá lâu, vui lòng thử lại với ít câu hơn" : "Không kết nối được dịch vụ AI",
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    console.error("AI provider error", env.base, opts.model, lastStatus, lastMsg);
+    if (lastStatus === 401 || lastStatus === 403) throw new HttpError(503, "Khoá AI không hợp lệ hoặc đã hết hạn — kiểm tra lại ở Cài đặt › AI");
+    if (lastStatus === 402) throw new HttpError(503, "Tài khoản ModelAPI đã hết số dư");
+    if (lastStatus === 429) throw new HttpError(429, "Dịch vụ AI đang quá tải hoặc hết hạn mức, vui lòng thử lại sau");
+    if (env.fallback && env.fallback !== opts.model && MODEL_GONE.test(lastMsg)) return chat({ ...opts, model: env.fallback });
+    if ([500, 502, 503, 504].includes(lastStatus) && !retried) {
+      retried = true;
+      i--;
+      await new Promise((r) => setTimeout(r, 1200));
+      continue;
+    }
+    if (lastStatus !== 400 && lastStatus !== 422) break;
+  }
+  throw new HttpError(502, `Dịch vụ AI báo lỗi (mã ${lastStatus || "?"})${lastMsg ? `: ${lastMsg.slice(0, 160)}` : ""}`);
+}
+
+const nullsToEmpty = (v: unknown): unknown =>
+  v === null ? "" : Array.isArray(v) ? v.map(nullsToEmpty) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, nullsToEmpty(x)])) : v;
+
+/** Gửi một câu ngắn để kiểm tra khoá / cổng / model (nút "Kiểm tra kết nối" ở Cài đặt › AI). */
+export async function testAiConnection(override?: Parameters<typeof aiConfig>[0]) {
+  const cfg = await aiConfig(override);
+  const t = Date.now();
+  const reply = await chat({
+    cfg,
+    model: cfg.model,
+    messages: [
+      { role: "system", content: "Bạn là trợ lý. Trả lời thật ngắn." },
+      { role: "user", content: "Trả lời đúng một từ tiếng Nhật nghĩa là 'xin chào'." },
+    ],
+    maxTokens: 30,
+    json: false,
+  });
+  return { ok: true, base: cfg.base, model: cfg.model, keySource: cfg.keySource, reply: reply.trim().slice(0, 80), ms: Date.now() - t };
+}
+
+/**
+ * Gọi model yêu cầu trả JSON đúng schema zod (schema gửi kèm trong system prompt),
+ * validate lại và trả về object. `onText` nhận văn bản đã nhận (để báo tiến độ).
  */
 async function structured<T extends z.ZodType>(opts: {
   schema: T;
@@ -63,38 +289,32 @@ async function structured<T extends z.ZodType>(opts: {
   effort?: "low" | "medium" | "high";
   onText?: (soFar: string) => void;
 }): Promise<z.infer<T>> {
-  const c = getClient();
-  const { model } = await aiSettings();
-  const format = zodOutputFormat(opts.schema);
+  const cfg = await aiConfig();
+  const jsonSchema = JSON.stringify(z.toJSONSchema(opts.schema));
+  const system = `${opts.system}
+
+ĐỊNH DẠNG TRẢ LỜI: chỉ trả về MỘT đối tượng JSON hợp lệ, không markdown, không giải thích thêm, khớp đúng JSON Schema sau:
+${jsonSchema}`;
   try {
-    const stream = c.beta.messages.stream({
-      model,
-      max_tokens: opts.maxTokens,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      system: opts.system,
-      output_config: { effort: opts.effort ?? "medium", format: { type: "json_schema", schema: format.schema } },
-      messages: [{ role: "user", content: opts.user }],
+    const text = await chat({
+      cfg,
+      model: cfg.model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: opts.user },
+      ],
+      maxTokens: opts.maxTokens,
+      json: true,
+      onText: opts.onText,
     });
-    if (opts.onText) {
-      let acc = "";
-      stream.on("text", (delta) => {
-        acc += delta;
-        opts.onText!(acc);
-      });
+    const json = parseJsonLoose(text);
+    if (json === undefined) throw new HttpError(502, "AI trả về dữ liệu không đúng định dạng JSON");
+    // Model kiểu OpenAI hay trả null cho trường trống → coi như chuỗi rỗng trước khi validate.
+    const r = opts.schema.safeParse(nullsToEmpty(json));
+    if (!r.success) {
+      console.error("AI JSON không khớp schema", r.error.issues.slice(0, 5));
+      throw new HttpError(502, "AI trả về dữ liệu không hợp lệ, vui lòng thử lại");
     }
-    const msg = await stream.finalMessage();
-    if (msg.stop_reason === "refusal") throw new HttpError(422, "AI từ chối xử lý yêu cầu này, hãy điều chỉnh nội dung");
-    if (msg.stop_reason === "max_tokens") throw new HttpError(502, "Kết quả AI bị cắt ngắn — hãy giảm số câu hỏi");
-    const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
-    let json: unknown;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      throw new HttpError(502, "AI trả về dữ liệu không đúng định dạng JSON");
-    }
-    const r = opts.schema.safeParse(json);
-    if (!r.success) throw new HttpError(502, "AI trả về dữ liệu không hợp lệ, vui lòng thử lại");
     return r.data;
   } catch (e) {
     throw aiError(e);
@@ -213,7 +433,7 @@ export async function generateQuiz(p: GenParams, onProgress?: (done: number, tot
     schema: genOutSchema,
     system: SYSTEM_GEN,
     user: genUser(p),
-    maxTokens: Math.min(64000, 2500 + p.count * 1100),
+    maxTokens: Math.min(16000, 2000 + p.count * 600),
     effort: "medium",
     onText: onProgress
       ? (s) => {

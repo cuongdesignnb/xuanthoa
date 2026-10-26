@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Activity, Bot, CheckCircle2, CreditCard, Film, Globe, ImageIcon, KeyRound, Save, Share2, UserRound, XCircle } from "lucide-react";
 import { api, ApiError, fmtDate } from "@/lib/api";
@@ -79,14 +80,16 @@ export default function SettingsPage() {
 /* ------------------------------------------------------------------ */
 
 /** Bỏ các trường chỉ đọc do API gắn thêm (trạng thái khóa…). */
-const withoutMeta = (v: Record<string, unknown>) => Object.fromEntries(Object.entries(v).filter(([k]) => k !== "keyConfigured" && k !== "ffmpeg"));
+const withoutMeta = (v: Record<string, unknown>) =>
+  Object.fromEntries(
+    Object.entries(v).filter(([k]) => !["keyConfigured", "keySource", "keyLast4", "apiKeyLast4", "effective", "envDefaults", "ffmpeg", "provider", "envModel", "maxTokens"].includes(k)),
+  );
 
 function SettingForm({ tab, value }: { tab: TabKey; value: Record<string, unknown> }) {
   const { can } = useAuth();
   const writable = can("settings.write");
   const key: Key = tab === "general" ? "site" : (tab as Key);
-  const keyConfigured = !!value.keyConfigured;
-  const initial = withoutMeta(value);
+  const initial = tab === "ai" ? { ...withoutMeta(value), apiKey: "", clearKey: false } : withoutMeta(value);
   const f = useForm<Record<string, unknown>>(initial);
   const v = f.values;
   const str = (k: string) => (v[k] as string | undefined) ?? "";
@@ -120,7 +123,7 @@ function SettingForm({ tab, value }: { tab: TabKey; value: Record<string, unknow
       toast.success("Đã lưu cài đặt");
       invalidate("/admin/settings");
       invalidate(`/public/settings/${key}`);
-      if (r) f.reset(withoutMeta(r));
+      if (r) f.reset(tab === "ai" ? { ...withoutMeta(r), apiKey: "", clearKey: false } : withoutMeta(r));
     } catch (e) {
       if (!(e instanceof ApiError && Object.keys(e.fieldErrors).length)) toast.error(e);
     }
@@ -176,19 +179,7 @@ function SettingForm({ tab, value }: { tab: TabKey; value: Record<string, unknow
           </div>
         </div>
       )}
-      {tab === "ai" && (
-        <div className="space-y-4">
-          <KeyStatus ok={!!keyConfigured} label="Khóa API Anthropic" env="ANTHROPIC_API_KEY" />
-          <div className="grid gap-4 md:grid-cols-2">
-            {text("model", "Model", { hint: "VD: claude-sonnet-5-5" })}
-            {numIn("maxTokens", "Giới hạn token mỗi yêu cầu", undefined, "token")}
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {sw("gradingEnabled", "Chấm bài tự luận bằng AI", "Tự động chấm và nhận xét câu trả lời viết")}
-            {sw("generateEnabled", "Tạo đề bằng AI", "Cho phép biên tập viên sinh đề thi/bài tập")}
-          </div>
-        </div>
-      )}
+      {tab === "ai" && <AiSettings value={value} v={v} set={f.set} errors={f.errors} writable={writable} text={text} numIn={numIn} sw={sw} />}
       {tab === "video" && (
         <div className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">{numIn("tokenTtlSec", "Thời hạn token phát video", "Khoá giải mã HLS hết hạn sau khoảng này", "giây")}</div>
@@ -220,16 +211,134 @@ function SettingForm({ tab, value }: { tab: TabKey; value: Record<string, unknow
   );
 }
 
-function KeyStatus({ ok, label, env }: { ok: boolean; label: string; env: string }) {
+type AiMeta = {
+  keyConfigured?: boolean;
+  keySource?: "admin" | "env" | null;
+  keyLast4?: string;
+  effective?: { baseUrl: string; model: string; fallbackModel: string };
+  envDefaults?: { baseUrl: string; model: string; hasKey: boolean };
+};
+
+/** Tab Cài đặt › AI: admin tự điền khoá ModelAPI, cổng, model; kiểm tra kết nối trước khi lưu. */
+function AiSettings({
+  value,
+  v,
+  set,
+  errors,
+  writable,
+  text,
+  numIn,
+  sw,
+}: {
+  value: Record<string, unknown>;
+  v: Record<string, unknown>;
+  set: (k: string, x: unknown) => void;
+  errors: Record<string, string>;
+  writable: boolean;
+  text: (k: string, label: string, props?: { placeholder?: string; hint?: string; type?: string }) => React.ReactNode;
+  numIn: (k: string, label: string, hint?: string, suffix?: string) => React.ReactNode;
+  sw: (k: string, label: string, hint?: string) => React.ReactNode;
+}) {
+  const m = value as AiMeta;
+  const [show, setShow] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const clearing = !!v.clearKey;
+  const env = m.envDefaults;
+
+  const test = async () => {
+    setTesting(true);
+    setResult(null);
+    try {
+      const r = await api<{ model: string; base: string; reply: string; ms: number; keySource: string }>("/admin/settings/ai/test", {
+        body: {
+          apiKey: clearing ? undefined : (v.apiKey as string) || undefined,
+          baseUrl: (v.baseUrl as string) || undefined,
+          model: (v.model as string) || undefined,
+          fallbackModel: (v.fallbackModel as string) || undefined,
+        },
+      });
+      setResult({ ok: true, text: `Kết nối thành công · ${r.model} · ${r.ms}ms · AI trả lời: “${r.reply}”` });
+    } catch (e) {
+      setResult({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
-    <div className={cx("flex items-center gap-3 rounded-xl p-3", ok ? "bg-emerald-50" : "bg-amber-50")}>
-      {ok ? <CheckCircle2 className="size-5 text-emerald-500" /> : <XCircle className="size-5 text-amber-500" />}
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold">
-          {label}: {ok ? "Đã cấu hình" : "Chưa cấu hình"}
-        </p>
-        <p className="text-xs text-muted">
-          Khóa được đặt bằng biến môi trường <code className="rounded bg-white px-1">{env}</code> trên máy chủ và không bao giờ hiển thị tại đây.
+    <div className="space-y-5">
+      <div className={cx("flex items-start gap-3 rounded-xl p-3", m.keyConfigured && !clearing ? "bg-emerald-50" : "bg-amber-50")}>
+        {m.keyConfigured && !clearing ? <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-500" /> : <XCircle className="mt-0.5 size-5 shrink-0 text-amber-500" />}
+        <div className="min-w-0 flex-1 text-sm">
+          <p className="font-semibold">
+            Khoá AI:{" "}
+            {clearing
+              ? "sẽ xoá khi lưu"
+              : m.keySource === "admin"
+                ? `đang dùng khoá nhập tại đây (…${m.keyLast4})`
+                : m.keySource === "env"
+                  ? `đang dùng biến môi trường AI_API_KEY (…${m.keyLast4})`
+                  : "chưa cấu hình"}
+          </p>
+          <p className="text-xs text-muted">
+            Đang chạy: <code className="rounded bg-white px-1">{m.effective?.baseUrl}</code> · model{" "}
+            <code className="rounded bg-white px-1">{m.effective?.model}</code>
+            {m.effective?.fallbackModel ? (
+              <>
+                {" "}
+                · dự phòng <code className="rounded bg-white px-1">{m.effective.fallbackModel}</code>
+              </>
+            ) : null}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field
+          label="Khoá API (ModelAPI)"
+          error={errors.apiKey}
+          hint={m.keySource === "admin" ? "Để trống để giữ khoá hiện tại. Khoá được mã hoá khi lưu và không bao giờ hiển thị lại." : "Lấy khoá tại modelapi.vn. Khoá được mã hoá khi lưu."}
+        >
+          <div className="flex gap-2">
+            <Input
+              type={show ? "text" : "password"}
+              autoComplete="off"
+              value={(v.apiKey as string) ?? ""}
+              onChange={(e) => {
+                set("apiKey", e.target.value);
+                if (e.target.value) set("clearKey", false);
+              }}
+              placeholder={m.keySource === "admin" ? `•••••••• ${m.keyLast4}` : "sk-…"}
+              disabled={!writable || clearing}
+            />
+            <Button type="button" variant="ghost" onClick={() => setShow((x) => !x)} disabled={!writable}>
+              {show ? "Ẩn" : "Hiện"}
+            </Button>
+          </div>
+          {m.keySource === "admin" && writable && (
+            <button type="button" onClick={() => set("clearKey", !clearing)} className="mt-1 text-xs font-semibold text-red-500">
+              {clearing ? "Huỷ xoá khoá" : "Xoá khoá đã lưu"}
+            </button>
+          )}
+        </Field>
+        {text("baseUrl", "Địa chỉ cổng AI (Base URL)", { placeholder: env?.baseUrl ?? "https://modelapi.vn/v1", hint: "Chuẩn OpenAI (…/v1). Để trống = dùng mặc định." })}
+        {text("model", "Model", { placeholder: env?.model ?? "gpt-6.1-sol", hint: "Tên model trên ModelAPI. Để trống = dùng mặc định." })}
+        {text("fallbackModel", "Model dự phòng", { placeholder: "Tuỳ chọn", hint: "Dùng khi model chính hết kênh / không khả dụng." })}
+        {numIn("timeoutSec", "Thời gian chờ tối đa", "Tạo đề nhiều câu có thể mất 30–90 giây", "giây")}
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        {sw("gradingEnabled", "Chấm bài tự luận bằng AI", "Tự động chấm và nhận xét câu trả lời viết")}
+        {sw("generateEnabled", "Tạo đề bằng AI", "Cho phép biên tập viên sinh đề thi/bài tập")}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-ink/10 p-3">
+        <Button type="button" variant="outline" loading={testing} onClick={test} icon={<Bot className="size-4" />} disabled={!writable}>
+          Kiểm tra kết nối
+        </Button>
+        <p className={cx("min-w-0 flex-1 text-xs", !result ? "text-muted" : result.ok ? "text-emerald-600" : "text-red-600")}>
+          {result?.text ?? "Gửi một câu ngắn tới AI bằng giá trị đang nhập (chưa cần lưu)."}
         </p>
       </div>
     </div>

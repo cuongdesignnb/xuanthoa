@@ -26,7 +26,10 @@ services:
     environment:
       DATABASE_URL: postgres://nihongo:${POSTGRES_PASSWORD:-nihongo}@db:5432/nihongo
       JWT_SECRET: ${JWT_SECRET:?Đặt JWT_SECRET (>= 32 ký tự) trong file .env}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-https://modelapi.vn/v1}
+      AI_MODEL: ${AI_MODEL:-gpt-6.1-sol}
+      AI_FALLBACK_MODEL: ${AI_FALLBACK_MODEL:-}
       CORS_ORIGIN: ${PUBLIC_URL:-http://localhost:8080}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       SEED_ON_EMPTY: ${SEED_ON_EMPTY:-true}

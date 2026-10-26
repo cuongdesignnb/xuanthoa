@@ -129,7 +129,7 @@ export default async function seedCore(ctx: SeedCtx) {
     { key: "site", value: { name: "Nihongo+", tagline: "Học tiếng Nhật, mở rộng tương lai", hotline: "1900 6868", email: "hotro@nihongo.plus", adminEmail: "admin@nihongo.vn", version: "2.5.0" } },
     { key: "social", value: { facebook: "#", youtube: "#", tiktok: "#", instagram: "#" } },
     { key: "payment", value: { vnpay: true, momo: true, bank: true, currency: "VND" } },
-    { key: "ai", value: { model: "claude-sonnet-5-5", gradingEnabled: true } },
+    { key: "ai", value: { model: "", gradingEnabled: true } },
     { key: "video", value: { allowDownload: false, watermark: true, tokenTtlSec: 600 } },
     { key: "media", value: { webpQuality: 82, maxWidth: 2400, deleteOriginal: true } },
   ]);

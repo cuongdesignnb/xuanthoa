@@ -248,8 +248,8 @@ export default function AiGenerator() {
         <div className="mb-4 flex items-start gap-3 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-100">
           <AlertTriangle className="mt-0.5 size-5 shrink-0" />
           <div>
-            <p className="font-bold">{st.message ?? "Chưa cấu hình ANTHROPIC_API_KEY"}</p>
-            <p className="text-xs">Thêm <code className="rounded bg-white px-1">ANTHROPIC_API_KEY=…</code> vào file <code className="rounded bg-white px-1">api/.env</code> rồi khởi động lại API. Trong lúc chờ, câu tự luận được chấm tự động bằng so khớp đáp án.</p>
+            <p className="font-bold">{st.message ?? "Chưa cấu hình AI_API_KEY (ModelAPI)"}</p>
+            <p className="text-xs">Vào <a href="/admin/cai-dat?tab=ai" className="font-semibold underline">Cài đặt › AI</a> để nhập khoá ModelAPI (lấy tại modelapi.vn), rồi bấm “Kiểm tra kết nối”. Trong lúc chờ, câu tự luận được chấm tự động bằng so khớp đáp án.</p>
           </div>
         </div>
       )}

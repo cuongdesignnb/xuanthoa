@@ -12,7 +12,7 @@ Monorepo gồm:
 ## Chạy bằng Docker (một lệnh)
 
 ```bash
-cp .env.example .env        # đặt JWT_SECRET (>= 32 ký tự), tuỳ chọn ANTHROPIC_API_KEY
+cp .env.example .env        # đặt JWT_SECRET (>= 32 ký tự), tuỳ chọn AI_API_KEY (ModelAPI)
 docker compose up -d --build
 ```
 
@@ -43,7 +43,7 @@ docker compose exec api node dist/db/seed/index.js
 | Database | Supabase Postgres (project `wyxvjhxahgejirmkmgov`, Tokyo), role riêng `nihongo_app` qua transaction pooler `:6543` (migrate/seed dùng `:5432`); RLS bật trên mọi bảng, `anon`/`authenticated` không có quyền |
 | Tệp | Supabase Storage bucket công khai `media` (ảnh WebP, avatar, tài liệu) |
 
-Biến môi trường của project `xuanthoa-api`: `DATABASE_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_BUCKET`, `COOKIE_SECURE=true` (tuỳ chọn `ANTHROPIC_API_KEY`). Bản sao cục bộ nằm ở `.env.supabase` (không commit).
+Biến môi trường của project `xuanthoa-api`: `DATABASE_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_BUCKET`, `COOKIE_SECURE=true`, `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` / `AI_FALLBACK_MODEL` (AI qua ModelAPI). Bản sao cục bộ nằm ở `.env.supabase` (không commit).
 
 Deploy lại:
 
@@ -69,6 +69,6 @@ cd web && npm i && npm run dev          # :3000 — proxy /api → :4000
 - **Không hardcode client**: mọi nội dung site (khóa học, bài học, bài tập, đề JLPT, blog, giáo viên, đánh giá, gói học, dashboard học viên…) đọc từ API/PostgreSQL.
 - **Khu quản trị** đủ màn hình theo menu: Tổng quan, Học viên (+ lượt làm bài), Giáo viên, Khóa học, Bài học, Bài tập, JLPT & Đề thi (+ tạo đề AI), Blog & Tài nguyên, Đơn hàng, Gói học, Doanh thu, Mã giảm giá, Thông báo, Đánh giá & Báo lỗi, Phân quyền nhân sự (ma trận quyền), Báo cáo, Cài đặt, Media Library, Video, Trung tâm hỗ trợ, Log hoạt động. Phân quyền theo module `*.read / *.write`.
 - **Trình soạn thảo** (TipTap) gắn vào mọi ô nội dung HTML: tiếng Nhật (IME), furigana `<ruby>`, chuyển romaji → kana, font Nhật, ảnh từ Media Library, YouTube, bảng.
-- **AI (Claude)**: tạo đề trắc nghiệm/tự luận theo cấp độ, kỹ năng, chủ đề (xem trước, sửa, lưu) và chấm điểm câu tự luận/ngắn kèm nhận xét. Không có `ANTHROPIC_API_KEY` thì các route AI báo 503 và việc chấm dùng bộ so khớp dự phòng.
+- **AI (ModelAPI — cổng tương thích OpenAI, giống dự án comnha)**: tạo đề trắc nghiệm/tự luận theo cấp độ, kỹ năng, chủ đề (xem trước, sửa, lưu) và chấm câu tự luận/trả lời ngắn kèm nhận xét. Cấu hình `AI_API_KEY`, `AI_BASE_URL` (mặc định `https://modelapi.vn/v1`), `AI_MODEL` (mặc định `gpt-6.1-sol`), `AI_FALLBACK_MODEL`; model có thể ghi đè ở Cài đặt › AI. Chưa có khoá thì các route AI báo 503 và việc chấm dùng bộ so khớp dự phòng.
 - **Video chống tải**: upload → ffmpeg chuyển HLS mã hoá AES-128, khoá & segment chỉ cấp qua token ngắn hạn theo quyền xem bài; player có watermark email, chặn chuột phải/tải. Hoặc nguồn YouTube (youtube-nocookie, điều khiển tuỳ biến).
 - **Media Library**: upload ảnh tự chuyển sang WebP (chất lượng/kích thước theo cài đặt) và **xoá bản gốc**.

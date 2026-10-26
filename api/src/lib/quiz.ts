@@ -74,8 +74,9 @@ export async function gradeAnswers(quiz: Quiz, questions: Question[], raw: Attem
   let aiNote: string | null = null;
   if (open.length) {
     const settings = await aiSettings();
+    const keyOk = await hasAiKey();
     let results: { id: string; score: number; feedback: string; correct: boolean }[] | null = null;
-    if (hasAiKey() && settings.gradingEnabled) {
+    if (keyOk && settings.gradingEnabled) {
       try {
         const r = await gradeWithAi(quiz.level, open);
         results = r.items;
@@ -85,9 +86,9 @@ export async function gradeAnswers(quiz: Quiz, questions: Question[], raw: Attem
         aiNote = `AI chấm bài gặp lỗi (${(e as Error).message}); đã chấm tự động bằng so khớp đáp án.`;
       }
     } else {
-      aiNote = hasAiKey()
+      aiNote = keyOk
         ? "Chấm AI đang tắt trong cài đặt; câu tự luận được chấm tự động bằng so khớp đáp án."
-        : "Chưa cấu hình AI (ANTHROPIC_API_KEY); câu tự luận được chấm tự động bằng so khớp đáp án.";
+        : "Chưa cấu hình khoá AI (Cài đặt › AI); câu tự luận được chấm tự động bằng so khớp đáp án.";
     }
     results ??= open.map(fallbackGrade);
     for (const r of results) {

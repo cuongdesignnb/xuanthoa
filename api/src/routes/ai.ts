@@ -13,7 +13,7 @@ import { db, schema } from "../db/index.js";
 import { HttpError, notFound, parse } from "../lib/http.js";
 import { logActivity, requirePerm } from "../lib/auth.js";
 import { zLevel, zStatus } from "../lib/crud.js";
-import { aiError, aiSettings, explainQuestion, generateQuiz, hasAiKey, NO_KEY_MESSAGE, regenerateQuestion, type GenQuestion } from "../lib/ai.js";
+import { aiConfig, aiError, aiSettings, explainQuestion, generateQuiz, hasAiKey, NO_KEY_MESSAGE, regenerateQuestion, type GenQuestion } from "../lib/ai.js";
 import { createQuiz, questionBody } from "./quizzes-admin.js";
 
 const write = requirePerm("quizzes.write");
@@ -46,8 +46,10 @@ const genSchema = z
     return { ...v, types: t };
   });
 
-const ensureKey = () => {
-  if (!hasAiKey()) throw new HttpError(503, NO_KEY_MESSAGE);
+const ensureKey = async () => {
+  const c = await aiConfig();
+  if (!c.key) throw new HttpError(503, NO_KEY_MESSAGE);
+  if (!c.generateEnabled) throw new HttpError(403, "Tạo đề bằng AI đang tắt trong Cài đặt › AI");
 };
 
 const toQuestionInput = (q: GenQuestion) => ({
@@ -65,15 +67,23 @@ const toQuestionInput = (q: GenQuestion) => ({
 
 export default async function aiRoutes(app: FastifyInstance) {
   app.get("/api/admin/ai/status", { preHandler: read }, async () => {
-    const s = await aiSettings();
-    return { configured: hasAiKey(), model: s.model, gradingEnabled: s.gradingEnabled, message: hasAiKey() ? null : NO_KEY_MESSAGE };
+    const c = await aiConfig();
+    return {
+      configured: !!c.key,
+      keySource: c.keySource,
+      provider: c.base,
+      model: c.model,
+      gradingEnabled: c.gradingEnabled,
+      generateEnabled: c.generateEnabled,
+      message: c.key ? null : NO_KEY_MESSAGE,
+    };
   });
 
   app.post("/api/admin/ai/generate-quiz", { preHandler: write, config: aiLimit }, async (req, reply) => {
     const p = parse(genSchema, req.body);
     const sse = String(req.headers.accept ?? "").includes("text/event-stream");
     if (!sse) {
-      ensureKey();
+      await ensureKey();
       const started = Date.now();
       const draft = await generateQuiz(p);
       await logActivity(req, "ai_generate", "quiz", null, `AI tạo ${draft.questions.length} câu ${p.level} (${p.skill})`, { ...p, ms: Date.now() - started });
@@ -93,7 +103,7 @@ export default async function aiRoutes(app: FastifyInstance) {
     const ping = setInterval(() => res.write(": ping\n\n"), 15000);
     try {
       send("progress", { stage: "start", done: 0, total: p.count, message: "Đang gửi yêu cầu tới AI…" });
-      ensureKey();
+      await ensureKey();
       const started = Date.now();
       const draft = await generateQuiz(p, (done, total) => send("progress", { stage: "generating", done, total, message: `AI đang soạn câu ${Math.min(done + 1, total)}/${total}…` }));
       send("progress", { stage: "validating", done: p.count, total: p.count, message: "Đang kiểm tra & loại câu trùng…" });
@@ -152,7 +162,7 @@ export default async function aiRoutes(app: FastifyInstance) {
       }),
       req.body,
     );
-    ensureKey();
+    await ensureKey();
     const q = await regenerateQuestion(b);
     await logActivity(req, "ai_regenerate", "question", null, `AI tạo lại 1 câu ${b.level}`);
     return { question: q, input: toQuestionInput(q) };
@@ -171,7 +181,7 @@ export default async function aiRoutes(app: FastifyInstance) {
       }),
       req.body,
     );
-    ensureKey();
+    await ensureKey();
     let q = { level: b.level ?? "N4", type: b.type ?? "mcq", prompt: b.prompt ?? "", options: b.options ?? [], answer: b.answer ?? "" };
     let qid: string | null = null;
     if (b.questionId) {
