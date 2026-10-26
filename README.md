@@ -40,7 +40,7 @@ docker compose exec api node dist/db/seed/index.js
 |---|---|
 | Web (Next.js) | <https://web-jade-six-27.vercel.app> — Vercel project `web`, env `API_URL=https://xuanthoa-api.vercel.app` (proxy `/api/*`) |
 | API (Fastify) | <https://xuanthoa-api.vercel.app> — Vercel project `xuanthoa-api` (thư mục `api/`, function `api/index.js`, region `hnd1`) |
-| Database | Supabase Postgres (project `wyxvjhxahgejirmkmgov`, Tokyo), role riêng `nihongo_app` qua session pooler `:5432`; RLS bật trên mọi bảng, `anon`/`authenticated` không có quyền |
+| Database | Supabase Postgres (project `wyxvjhxahgejirmkmgov`, Tokyo), role riêng `nihongo_app` qua transaction pooler `:6543` (migrate/seed dùng `:5432`); RLS bật trên mọi bảng, `anon`/`authenticated` không có quyền |
 | Tệp | Supabase Storage bucket công khai `media` (ảnh WebP, avatar, tài liệu) |
 
 Biến môi trường của project `xuanthoa-api`: `DATABASE_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_BUCKET`, `COOKIE_SECURE=true` (tuỳ chọn `ANTHROPIC_API_KEY`). Bản sao cục bộ nằm ở `.env.supabase` (không commit).

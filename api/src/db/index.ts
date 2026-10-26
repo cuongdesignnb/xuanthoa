@@ -11,7 +11,8 @@ const remote = /supabase\.(co|com)/.test(url);
 
 export const sqlClient = postgres(url, {
   // Serverless: mỗi instance giữ ít kết nối, nhường pooler phân phối.
-  max: process.env.VERCEL ? 1 : 10,
+  // Pooler transaction: client connection rẻ → mở đủ nhiều để mỗi truy vấn có kết nối riêng (không pipeline).
+  max: Number(process.env.DB_MAX ?? (txPooler ? 20 : process.env.VERCEL ? 1 : 10)),
   prepare: !txPooler,
   ssl: remote ? "require" : undefined,
   idle_timeout: process.env.VERCEL ? 20 : undefined,
