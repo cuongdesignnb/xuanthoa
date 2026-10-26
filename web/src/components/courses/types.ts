@@ -76,6 +76,8 @@ export type LessonRowData = {
   completed: boolean;
 };
 
+export type CourseResource = { id: string; title: string; fileType: string; sizeBytes: number; isFree: boolean; fileUrl: string | null };
+
 export type CourseDetailData = CourseSummary & {
   description: string | null;
   teacher:
@@ -102,7 +104,9 @@ export type CourseDetailData = CourseSummary & {
     count: number;
     items: { id: string; authorName: string; authorRole: string | null; rating: number; content: string; createdAt: string; avatarUrl: string | null }[];
   };
-  resources: { id: string; title: string; fileType: string; sizeBytes: number; isFree: boolean; fileUrl: string | null }[];
+  resources: CourseResource[];
+  /** Tài liệu gắn theo từng bài học, nhóm theo bài. */
+  lessonResources?: { lessonId: string; lessonSlug: string; lessonTitle: string; lessonNumber: number; items: CourseResource[] }[];
 };
 
 export type VocabItem = {

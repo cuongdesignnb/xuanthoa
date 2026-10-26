@@ -352,6 +352,23 @@ export default async function courseRoutes(app: FastifyInstance) {
       .orderBy(asc(schema.resources.createdAt));
     const canDownload = enrolled || isStaff;
 
+    // Tài liệu gắn theo từng bài học (gom lên trang chi tiết khóa học, nhóm theo bài).
+    const lessonRes = lessonRows.length
+      ? await db
+          .select({
+            id: schema.resources.id,
+            title: schema.resources.title,
+            fileType: schema.resources.fileType,
+            sizeBytes: schema.resources.sizeBytes,
+            isFree: schema.resources.isFree,
+            fileUrl: schema.resources.fileUrl,
+            lessonId: schema.resources.lessonId,
+          })
+          .from(schema.resources)
+          .where(inArray(schema.resources.lessonId, lessonRows.map((l) => l.id)))
+          .orderBy(asc(schema.resources.createdAt))
+      : [];
+
     const { status: _s, ...rest } = course;
     void _s;
     const firstFree = flat.find((l) => l.isFree) ?? null;
@@ -368,6 +385,17 @@ export default async function courseRoutes(app: FastifyInstance) {
       resumeLesson: lastSlug ? flat.find((l) => l.slug === lastSlug) && { slug: lastSlug } : next ? { slug: next.slug } : null,
       reviews: { avg: Math.round(reviewStats.avg * 10) / 10, count: reviewStats.count, items: reviewItems },
       resources: resources.map((r) => ({ ...r, fileUrl: canDownload || r.isFree ? r.fileUrl : null })),
+      lessonResources: flat
+        .map((l) => ({
+          lessonId: l.id,
+          lessonSlug: l.slug,
+          lessonTitle: l.title,
+          lessonNumber: l.number,
+          items: lessonRes
+            .filter((r) => r.lessonId === l.id)
+            .map(({ lessonId: _l, ...r }) => ({ ...r, fileUrl: canDownload || r.isFree || l.isFree ? r.fileUrl : null })),
+        }))
+        .filter((g) => g.items.length),
     };
   });
 

@@ -38,6 +38,7 @@ import { Petals } from "../Hero";
 import { Reveal, avatar } from "../ui";
 import { Torii } from "./art";
 import { RichTextView } from "../RichText";
+import type { CourseResource } from "./types";
 import { api, ApiError, timeAgo, vnd } from "@/lib/api";
 import { invalidate, useApi } from "@/lib/hooks";
 import { useAuth } from "@/lib/auth";
@@ -162,8 +163,8 @@ export default function CourseDetail({ slug }: { slug: string }) {
             </section>
           )}
           <Modules c={c} />
-          <Reviews c={c} />
           <Materials c={c} />
+          <Reviews c={c} />
         </div>
         <aside className="no-scrollbar lg:sticky lg:top-[132px] lg:max-h-[calc(100vh-144px)] lg:self-start lg:overflow-y-auto lg:pb-2">
           <Sidebar c={c} />
@@ -587,45 +588,99 @@ function Reviews({ c }: { c: CourseDetailData }) {
   );
 }
 
+function ResourceRow({ m, i }: { m: CourseResource; i: number }) {
+  return (
+    <div className="group flex items-center gap-3 rounded-xl border border-ink/5 bg-white p-3 shadow-sm transition hover:border-brand-200">
+      <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-500">
+        {i % 2 ? <Layers className="size-5" /> : <FileText className="size-5" />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold">{m.title}</span>
+        <span className="block text-[11px] text-muted">
+          {m.fileType} • {fileSize(m.sizeBytes)}
+          {m.isFree && <span className="ml-1 font-semibold text-emerald-600">• Miễn phí</span>}
+        </span>
+      </span>
+      {m.fileUrl ? (
+        <a
+          href={m.fileUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="grid size-8 place-items-center rounded-full text-muted transition group-hover:bg-brand-500 group-hover:text-white"
+          title="Tải về"
+          aria-label={`Tải ${m.title}`}
+        >
+          <Download className="size-4" />
+        </a>
+      ) : (
+        <span className="grid size-8 place-items-center rounded-full text-muted" title="Tải về sau khi đăng ký">
+          <Lock className="size-4" />
+        </span>
+      )}
+    </div>
+  );
+}
+
 function Materials({ c }: { c: CourseDetailData }) {
-  if (!c.resources.length) return null;
+  const groups = c.lessonResources ?? [];
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? groups : groups.slice(0, 4);
+  const total = c.resources.length + groups.reduce((s, g) => s + g.items.length, 0);
+  const locked = !c.canLearn && total > 0;
   return (
     <section id="tai-lieu" className="scroll-mt-36">
       <h2 className="text-xl font-extrabold sm:text-2xl">Tài liệu khóa học</h2>
-      <p className="mt-1 text-xs text-muted">Tài liệu được cung cấp đầy đủ sau khi đăng ký, có thể tải về học offline.</p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        {c.resources.map((m, i) => (
-          <Reveal key={m.id} delay={i * 0.05} y={12}>
-            <div className="group flex items-center gap-3 rounded-xl border border-ink/5 bg-white p-3 shadow-sm transition hover:border-brand-200">
-              <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-500">
-                {i % 2 ? <Layers className="size-5" /> : <FileText className="size-5" />}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{m.title}</span>
-                <span className="block text-[11px] text-muted">
-                  {m.fileType} • {fileSize(m.sizeBytes)}
-                  {m.isFree && <span className="ml-1 font-semibold text-emerald-600">• Miễn phí</span>}
-                </span>
-              </span>
-              {m.fileUrl ? (
-                <a
-                  href={m.fileUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="grid size-8 place-items-center rounded-full text-muted transition group-hover:bg-brand-500 group-hover:text-white"
-                  title="Tải về"
-                >
-                  <Download className="size-4" />
-                </a>
-              ) : (
-                <span className="grid size-8 place-items-center rounded-full text-muted" title="Tải về sau khi đăng ký">
-                  <Lock className="size-4" />
-                </span>
-              )}
-            </div>
-          </Reveal>
-        ))}
-      </div>
+      <p className="mt-1 text-xs text-muted">
+        {total
+          ? `${total} tài liệu (PDF, bài tập, flashcard). ${locked ? "Tài liệu miễn phí tải ngay; phần còn lại mở sau khi đăng ký." : "Có thể tải về học offline."}`
+          : "Khóa học chưa có tài liệu đính kèm."}
+      </p>
+
+      {!total && (
+        <div className="mt-4 rounded-xl border border-dashed border-ink/10 bg-white/60 p-6 text-center text-sm text-muted">
+          <FileText className="mx-auto mb-2 size-6 text-brand-300" />
+          Tài liệu sẽ được giáo viên cập nhật trong quá trình học.
+        </div>
+      )}
+
+      {c.resources.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Tài liệu chung</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {c.resources.map((m, i) => (
+              <Reveal key={m.id} delay={i * 0.05} y={12}>
+                <ResourceRow m={m} i={i} />
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {groups.length > 0 && (
+        <div className="mt-5">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Theo bài học</p>
+          <div className="space-y-3">
+            {shown.map((g) => (
+              <div key={g.lessonId} className="rounded-2xl border border-ink/5 bg-white/70 p-3">
+                <Link href={`/hoc/${g.lessonSlug}`} className="mb-2 flex items-center gap-2 text-sm font-semibold hover:text-brand-500">
+                  <span className="rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-bold text-brand-500">Bài {g.lessonNumber}</span>
+                  <span className="truncate">{g.lessonTitle}</span>
+                </Link>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {g.items.map((m, i) => (
+                    <ResourceRow key={m.id} m={m} i={i} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          {groups.length > 4 && (
+            <button onClick={() => setShowAll((x) => !x)} className="mt-3 text-sm font-semibold text-brand-500 hover:underline">
+              {showAll ? "Thu gọn" : `Xem thêm tài liệu của ${groups.length - 4} bài`}
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }
