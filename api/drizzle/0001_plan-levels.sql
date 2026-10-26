@@ -1,0 +1,1 @@
+ALTER TABLE "plans" ADD COLUMN "levels" text[] DEFAULT '{}'::text[] NOT NULL;

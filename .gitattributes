@@ -1,0 +1,7 @@
+# Giữ LF cho mọi file văn bản (Dockerfile, nginx.conf, script chạy trong container Linux)
+* text=auto eol=lf
+*.png binary
+*.webp binary
+*.jpg binary
+*.ico binary
+*.pdf binary

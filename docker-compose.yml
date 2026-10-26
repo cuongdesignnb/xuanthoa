@@ -1,0 +1,73 @@
+name: nihongo
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nihongo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nihongo}
+      POSTGRES_DB: nihongo
+    ports:
+      - "5433:5432"   # chỉ để dev trên máy; bỏ dòng này khi deploy thật
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nihongo"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://nihongo:${POSTGRES_PASSWORD:-nihongo}@db:5432/nihongo
+      JWT_SECRET: ${JWT_SECRET:?Đặt JWT_SECRET (>= 32 ký tự) trong file .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CORS_ORIGIN: ${PUBLIC_URL:-http://localhost:8080}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SEED_ON_EMPTY: ${SEED_ON_EMPTY:-true}
+      LOG_LEVEL: info
+    volumes:
+      - storage:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/api/health || exit 1"]
+      interval: 10s
+      start_period: 40s
+      retries: 6
+
+  web:
+    build:
+      context: ./web
+      args:
+        API_URL: http://api:4000
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:4000
+    depends_on:
+      api:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+      - api
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  pgdata:
+  storage:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.88.0.0/24

@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-be-vietnam), system-ui, sans-serif;
+  --font-script: var(--font-script), cursive;
+  --font-jp: var(--font-jp), "Hiragino Mincho ProN", serif;
+
+  --color-brand-50: #fff4f4;
+  --color-brand-100: #ffe3e3;
+  --color-brand-200: #ffc9ca;
+  --color-brand-300: #ff9fa1;
+  --color-brand-400: #f86b6e;
+  --color-brand-500: #e5383b;
+  --color-brand-600: #d0262a;
+  --color-brand-700: #ad1d21;
+  --color-ink: #1d1d2b;
+  --color-muted: #6b6b7b;
+}
+
+body {
+  background: #fff;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+.text-gradient {
+  background: linear-gradient(90deg, #e5383b, #f86b6e);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.brush-underline {
+  position: relative;
+  white-space: nowrap;
+}
+.brush-underline::after {
+  content: "";
+  position: absolute;
+  left: -4%;
+  right: -4%;
+  bottom: -0.12em;
+  height: 0.35em;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 20' preserveAspectRatio='none'%3E%3Cpath d='M2 14 C 50 4, 120 2, 198 9' stroke='%23e5383b' stroke-width='6' fill='none' stroke-linecap='round' opacity='.55'/%3E%3C/svg%3E")
+    no-repeat center / 100% 100%;
+  z-index: -1;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+@keyframes petal-fall {
+  0% {
+    transform: translate3d(0, -10vh, 0) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(var(--drift), 110vh, 0) rotate(var(--spin));
+    opacity: 0;
+  }
+}
+.petal {
+  position: absolute;
+  top: 0;
+  animation: petal-fall var(--dur) linear var(--delay) infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .petal {
+    display: none;
+  }
+}
