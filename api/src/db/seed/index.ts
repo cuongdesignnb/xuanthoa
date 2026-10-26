@@ -16,7 +16,17 @@ const tables = await db.execute<{ tablename: string }>(
   sql`select tablename from pg_tables where schemaname = 'public' and tablename not like '__drizzle%'`,
 );
 const names = tables.map((t) => `"${t.tablename}"`).join(", ");
-if (names) await db.execute(sql.raw(`TRUNCATE ${names} RESTART IDENTITY CASCADE`));
+// An toàn: chỉ xoá dữ liệu cũ khi DB đã có người dùng VÀ đặt SEED_FORCE=true (hoặc chạy local với Postgres Docker).
+const [{ n }] = await db.execute<{ n: number }>(sql`select count(*)::int as n from users`);
+const local = /@(localhost|127\.0\.0\.1|db):/.test(process.env.DATABASE_URL ?? "");
+if (n > 0) {
+  if (process.env.SEED_FORCE !== "true" && !local) {
+    console.error(`DB đã có ${n} người dùng. Đặt SEED_FORCE=true nếu thực sự muốn xoá sạch và seed lại.`);
+    await sqlClient.end();
+    process.exit(1);
+  }
+  if (names) await db.execute(sql.raw(`TRUNCATE ${names} RESTART IDENTITY CASCADE`));
+}
 
 const ctx = createCtx();
 const files = (await readdir(here)).filter((f) => /^\d\d-.*\.(ts|js)$/.test(f)).sort();

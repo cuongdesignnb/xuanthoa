@@ -5,7 +5,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { eq, sql } from "drizzle-orm";
-import { PUBLIC_DIR, publicUrl } from "../../lib/storage.js";
+import { putPublic } from "../../lib/storage.js";
 import { slugify } from "../../lib/http.js";
 import type { SeedCtx } from "./ctx.js";
 import {
@@ -67,11 +67,10 @@ function makeRtf(title: string, lines: string[]) {
 }
 
 async function writeDoc(name: string, kind: "PDF" | "DOC", title: string, lines: string[]) {
-  const rel = path.join("resources", "khoa-hoc", `${name}.${kind === "PDF" ? "pdf" : "rtf"}`);
-  await mkdir(path.join(PUBLIC_DIR, "resources", "khoa-hoc"), { recursive: true });
   const buf = kind === "PDF" ? makePdf(title, lines) : makeRtf(title, lines);
-  await writeFile(path.join(PUBLIC_DIR, rel), buf);
-  return { fileUrl: publicUrl(rel), sizeBytes: buf.length };
+  const ext = kind === "PDF" ? "pdf" : "rtf";
+  const fileUrl = await putPublic(`resources/khoa-hoc/${name}.${ext}`, buf, kind === "PDF" ? "application/pdf" : "application/rtf");
+  return { fileUrl, sizeBytes: buf.length };
 }
 
 /* ------------------------------------------------------------------ */

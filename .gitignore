@@ -35,3 +35,6 @@ Thumbs.db
 .vscode/
 .idea/
 coverage/
+
+# Supabase CLI cache
+supabase/.temp/

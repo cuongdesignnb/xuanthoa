@@ -12,7 +12,7 @@ import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { allOf, badRequest, countAll, HttpError, listQuery, notFound, orderOf, pageOf, parse, searchWhere } from "../lib/http.js";
 import { logActivity, requirePerm } from "../lib/auth.js";
-import { PUBLIC_DIR, publicUrl } from "../lib/storage.js";
+import { putPublic, removePublic } from "../lib/storage.js";
 
 const m = schema.media;
 
@@ -96,8 +96,7 @@ type Pending = { tmp: string; bytes: number; name: string; mimetype: string };
 async function storeOne(p: Pending, folder: string, userId: string | undefined, cfg: MediaSettings) {
   const ext = extOf(p.name);
   const now = new Date();
-  const relDir = path.join("media", String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, "0"));
-  await mkdir(path.join(PUBLIC_DIR, relDir), { recursive: true });
+  const relDir = `media/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}`;
   const id = nanoid(16);
   const isImage = p.mimetype.startsWith("image/") || IMAGE_EXT.has(ext);
   try {
@@ -113,21 +112,21 @@ async function storeOne(p: Pending, folder: string, userId: string | undefined, 
         throw badRequest(`Không đọc được ảnh "${p.name}" (định dạng chưa hỗ trợ)`);
       }
       const animated = (meta.pages ?? 1) > 1 && (meta.format === "gif" || meta.format === "webp");
-      const rel = path.join(relDir, `${id}.webp`);
-      const out = path.join(PUBLIC_DIR, rel);
+      const rel = `${relDir}/${id}.webp`;
       let img = sharp(input, { failOn: "none", animated, limitInputPixels: 268402689 });
       if (!animated) img = img.rotate();
-      const info = await img
+      const { data: webp, info } = await img
         .resize({ width: cfg.maxWidth, withoutEnlargement: true })
         .webp({ quality: cfg.webpQuality, effort: 4 })
-        .toFile(out);
+        .toBuffer({ resolveWithObject: true });
+      const url = await putPublic(rel, webp, "image/webp");
       const height = animated ? (info.height ?? 0) / Math.max(1, meta.pages ?? 1) : info.height;
       const [row] = await db
         .insert(m)
         .values({
           filename: path.basename(p.name, path.extname(p.name)) + ".webp",
           originalName: p.name,
-          url: publicUrl(rel),
+          url,
           mime: "image/webp",
           size: info.size,
           width: info.width,
@@ -141,14 +140,10 @@ async function storeOne(p: Pending, folder: string, userId: string | undefined, 
     const mime = FILE_EXT[ext];
     if (!mime) throw badRequest(`Loại tệp ".${ext || "?"}" không được phép`);
     if (p.bytes > MAX_FILE) throw badRequest(`Tệp vượt quá ${MAX_FILE / 1024 / 1024}MB`);
-    const rel = path.join(relDir, `${id}.${ext}`);
-    const out = path.join(PUBLIC_DIR, rel);
-    await rename(p.tmp, out).catch(async () => {
-      await copyFile(p.tmp, out);
-    });
+    const url = await putPublic(`${relDir}/${id}.${ext}`, await readFile(p.tmp), mime);
     const [row] = await db
       .insert(m)
-      .values({ filename: p.name, originalName: p.name, url: publicUrl(rel), mime, size: p.bytes, folder, createdById: userId })
+      .values({ filename: p.name, originalName: p.name, url, mime, size: p.bytes, folder, createdById: userId })
       .returning();
     return { ...row, originalSize: p.bytes, savedPercent: 0, converted: false };
   } finally {
@@ -156,21 +151,10 @@ async function storeOne(p: Pending, folder: string, userId: string | undefined, 
   }
 }
 
-/** Đường dẫn đĩa của một url /api/files/... (chặn thoát thư mục). */
-export function fileOfUrl(url: string) {
-  if (!url.startsWith("/api/files/")) return null;
-  const rel = decodeURIComponent(url.slice("/api/files/".length));
-  const abs = path.resolve(PUBLIC_DIR, rel);
-  return abs.startsWith(path.resolve(PUBLIC_DIR) + path.sep) ? abs : null;
-}
-
 async function removeRows(req: FastifyRequest, ids: string[]) {
   if (!ids.length) return 0;
   const rows = await db.delete(m).where(inArray(m.id, ids)).returning();
-  for (const r of rows) {
-    const f = fileOfUrl(r.url);
-    if (f) await rm(f, { force: true }).catch(() => {});
-  }
+  for (const r of rows) await removePublic(r.url);
   if (rows.length === 1) await logActivity(req, "delete", "media", rows[0].id, `Xoá tệp ${rows[0].filename}`);
   else if (rows.length) await logActivity(req, "delete", "media", null, `Xoá ${rows.length} tệp media`);
   return rows.length;

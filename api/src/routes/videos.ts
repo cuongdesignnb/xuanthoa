@@ -13,7 +13,7 @@ import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { allOf, badRequest, countAll, forbidden, HttpError, listQuery, notFound, orderOf, pageOf, parse, searchWhere } from "../lib/http.js";
 import { can, logActivity, optionalUser, requirePerm, requireUser, type AuthUser } from "../lib/auth.js";
-import { PRIVATE_DIR, PUBLIC_DIR, publicUrl } from "../lib/storage.js";
+import { PRIVATE_DIR, PUBLIC_DIR, publicUrl, isServerless } from "../lib/storage.js";
 
 const v = schema.videos;
 
@@ -300,7 +300,8 @@ function tokenOf(req: FastifyRequest) {
 }
 
 export default async function videoRoutes(app: FastifyInstance) {
-  void resumePending();
+  // Serverless (Vercel): không có ổ đĩa lâu dài/ffmpeg nền → chỉ dùng video YouTube.
+  if (!isServerless) void resumePending();
 
   /* ---------- Admin ---------- */
 
@@ -351,6 +352,8 @@ export default async function videoRoutes(app: FastifyInstance) {
 
   /** Upload video (multipart, một hoặc nhiều tệp; trường `title` tuỳ chọn). Trả về ngay, xử lý HLS chạy nền. */
   app.post("/api/admin/videos", { preHandler: requirePerm("media.write") }, async (req, reply) => {
+    if (isServerless)
+      throw new HttpError(501, "Bản cloud chưa hỗ trợ upload video (cần máy chủ có ffmpeg). Vui lòng dùng link YouTube.");
     if (!req.isMultipart()) throw badRequest("Yêu cầu multipart/form-data");
     const files: { tmp: string; name: string; bytes: number }[] = [];
     let title = "";

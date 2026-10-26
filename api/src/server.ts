@@ -4,16 +4,15 @@ import jwt from "@fastify/jwt";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
-import fstatic from "@fastify/static";
-import { readdir, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { ZodError } from "zod";
 import { HttpError } from "./lib/http.js";
 import { AUTH_COOKIE } from "./lib/auth.js";
-import { PUBLIC_DIR, PRIVATE_DIR } from "./lib/storage.js";
+import { PUBLIC_DIR, PRIVATE_DIR, isServerless, useSupabaseStorage } from "./lib/storage.js";
+import { routes } from "./routes.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 export async function buildServer() {
   const app = Fastify({
@@ -31,15 +30,16 @@ export async function buildServer() {
   await app.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 * 1024, files: 20 } });
   await app.register(rateLimit, { global: false });
 
-  await mkdir(PUBLIC_DIR, { recursive: true });
-  await mkdir(PRIVATE_DIR, { recursive: true });
-  // Tệp công khai (ảnh WebP, tài liệu). Video HLS nằm ở PRIVATE_DIR và chỉ phục vụ qua route có token.
-  await app.register(fstatic, {
-    root: PUBLIC_DIR,
-    prefix: "/api/files/",
-    maxAge: "30d",
-    immutable: true,
-  });
+  // Ổ đĩa local: phục vụ tệp công khai (ảnh WebP, tài liệu) tại /api/files/. Trên Supabase Storage thì bỏ qua.
+  // Video HLS luôn nằm ở PRIVATE_DIR và chỉ phục vụ qua route có token.
+  if (!isServerless) {
+    await mkdir(PRIVATE_DIR, { recursive: true });
+    if (!useSupabaseStorage) {
+      await mkdir(PUBLIC_DIR, { recursive: true });
+      const { default: fstatic } = await import("@fastify/static");
+      await app.register(fstatic, { root: PUBLIC_DIR, prefix: "/api/files/", maxAge: "30d", immutable: true });
+    }
+  }
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) {
@@ -58,13 +58,7 @@ export async function buildServer() {
 
   app.get("/api/health", async () => ({ ok: true, time: new Date().toISOString() }));
 
-  // Tự nạp mọi file trong src/routes (mỗi file export default một plugin Fastify).
-  const routesDir = path.join(here, "routes");
-  const files = (await readdir(routesDir)).filter((f) => /\.(ts|js)$/.test(f) && !f.endsWith(".d.ts")).sort();
-  for (const f of files) {
-    const mod = await import(pathToFileURL(path.join(routesDir, f)).href);
-    if (typeof mod.default === "function") await app.register(mod.default);
-  }
+  for (const r of routes) await app.register(r);
 
   return app;
 }

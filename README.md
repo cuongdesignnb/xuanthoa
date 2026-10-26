@@ -34,6 +34,26 @@ Seed lại toàn bộ dữ liệu mẫu (xoá sạch DB):
 docker compose exec api node dist/db/seed/index.js
 ```
 
+## Bản online: Vercel + Supabase
+
+| Thành phần | Địa chỉ / cấu hình |
+|---|---|
+| Web (Next.js) | <https://web-jade-six-27.vercel.app> — Vercel project `web`, env `API_URL=https://xuanthoa-api.vercel.app` (proxy `/api/*`) |
+| API (Fastify) | <https://xuanthoa-api.vercel.app> — Vercel project `xuanthoa-api` (thư mục `api/`, function `api/index.js`, region `hnd1`) |
+| Database | Supabase Postgres (project `wyxvjhxahgejirmkmgov`, Tokyo), role riêng `nihongo_app` qua session pooler `:5432`; RLS bật trên mọi bảng, `anon`/`authenticated` không có quyền |
+| Tệp | Supabase Storage bucket công khai `media` (ảnh WebP, avatar, tài liệu) |
+
+Biến môi trường của project `xuanthoa-api`: `DATABASE_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_BUCKET`, `COOKIE_SECURE=true` (tuỳ chọn `ANTHROPIC_API_KEY`). Bản sao cục bộ nằm ở `.env.supabase` (không commit).
+
+Deploy lại:
+
+```bash
+cd api && vercel --prod --yes
+cd web && vercel --prod --yes
+```
+
+Giới hạn trên Vercel: request tối đa ~4,5 MB (ảnh/tài liệu lớn hơn không upload được), **không upload video** (cần ffmpeg chạy nền) — bài học dùng YouTube; muốn dùng video HLS chống tải thì chạy bản Docker. Seed lên DB cloud không bao giờ tự xoá dữ liệu cũ trừ khi đặt `SEED_FORCE=true`.
+
 ## Phát triển trên máy
 
 ```bash

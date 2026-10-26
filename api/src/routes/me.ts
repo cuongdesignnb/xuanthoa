@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { db, schema } from "../db/index.js";
 import { HttpError, badRequest, notFound, parse } from "../lib/http.js";
 import { requireUser } from "../lib/auth.js";
-import { PUBLIC_DIR, publicUrl } from "../lib/storage.js";
+import { putPublic } from "../lib/storage.js";
 
 const LEVELS = ["N5", "N4", "N3", "N2", "N1"] as const;
 const zLevel = z.enum(LEVELS);
@@ -436,10 +436,7 @@ export default async function meRoutes(app: FastifyInstance) {
     } catch {
       throw badRequest("Không đọc được ảnh");
     }
-    const rel = path.join("avatars", `${au.id}-${Date.now().toString(36)}.webp`);
-    await mkdir(path.join(PUBLIC_DIR, "avatars"), { recursive: true });
-    await writeFile(path.join(PUBLIC_DIR, rel), out);
-    const url = publicUrl(rel);
+    const url = await putPublic(`avatars/${au.id}-${Date.now().toString(36)}.webp`, out, "image/webp");
     await db.update(schema.users).set({ avatarUrl: url }).where(eq(schema.users.id, au.id));
     return { url };
   });

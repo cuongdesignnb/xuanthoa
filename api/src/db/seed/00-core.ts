@@ -1,5 +1,6 @@
 import { hashPassword, ALL_PERMISSIONS } from "../../lib/auth.js";
 import type { SeedCtx } from "./ctx.js";
+import { ensureBucket } from "../../lib/storage.js";
 
 /** Tài khoản demo (in ra khi seed xong). */
 export const DEMO = {
@@ -35,6 +36,7 @@ const LAST = ["Linh", "Minh", "Yến", "Huy", "Mai", "Anh", "Phương", "Hân", 
 
 export default async function seedCore(ctx: SeedCtx) {
   const { db, schema } = ctx;
+  await ensureBucket();
 
   /* Nhóm quyền */
   const [adminRole, editorRole, supportRole, accountantRole] = await db

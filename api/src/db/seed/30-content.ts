@@ -6,7 +6,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { asc, eq, sql } from "drizzle-orm";
 import type { SeedCtx } from "./ctx.js";
-import { PUBLIC_DIR, publicUrl } from "../../lib/storage.js";
+import { putPublic } from "../../lib/storage.js";
 import {
   COMMENT_REPLIES,
   COMMENT_SAMPLES,
@@ -85,23 +85,23 @@ export default async function seedContent(ctx: SeedCtx) {
     .returning({ id: schema.posts.id, title: schema.posts.title, status: schema.posts.status });
 
   /* ----------------------- Tài liệu miễn phí ----------------------- */
-  const dir = path.join(PUBLIC_DIR, "resources");
-  await mkdir(dir, { recursive: true });
+  const fileUrls: Record<string, string> = {};
   for (const r of SEED_RESOURCES) {
-    await writeFile(
-      path.join(dir, r.file),
+    fileUrls[r.file] = await putPublic(
+      `resources/${r.file}`,
       tinyPdf(r.title, [
         "Nihongo+ - Tai lieu hoc tieng Nhat mien phi",
         "Ban mau dung thu. Tai ban day du trong khoa hoc tren nihongo.vn",
         "",
         "Chuc ban hoc tot!  - Doi ngu giao vien Nihongo+",
       ]),
+      "application/pdf",
     );
   }
   await db.insert(schema.resources).values(
     SEED_RESOURCES.map((r, i) => ({
       title: r.title,
-      fileUrl: publicUrl(path.join("resources", r.file)),
+      fileUrl: fileUrls[r.file],
       fileType: "PDF",
       sizeBytes: Math.round(r.size * 1024 * 1024),
       downloads: r.downloads,
